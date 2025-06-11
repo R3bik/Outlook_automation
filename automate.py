@@ -286,7 +286,7 @@ class DistributorMatcherApp:
             else:
                 return None
 
-            possible_keys = ["Distributors", "Distributor' Name", "Distributor Name"]
+            possible_keys = ["Distributors", "Distributor' Name", "Distributor Name","Distributor"]
             name_col = next((headers.index(k) for k in possible_keys if k in headers), None)
 
             if name_col is None:
