@@ -225,28 +225,30 @@ class DistributorMatcherApp:
         matched_count = 0
 
         for distributor in self.distributor_data:
-            best_match = None
-            best_ratio = 0
+            all_matches = []  # Store all matches for this distributor
 
             for file in os.listdir(folder):
-                if not file.endswith(('.xlsx', '.xls')):
+                if not file.endswith(('.xlsx', '.xls', '.csv')):
                     continue
                 file_path = os.path.join(folder, file)
                 match_info = self.find_match_in_file(file_path, distributor['name'])
-                if match_info and match_info['match_ratio'] > best_ratio:
-                    best_ratio = match_info['match_ratio']
-                    best_match = match_info
+                if match_info and match_info['match_ratio'] > 0.8:  # Using our threshold
+                    all_matches.append(match_info)
 
-            if best_match and best_ratio > 0.8:
+            if all_matches:
                 matched_count += 1
                 status = "✔ MATCHED"
+                # Sort matches by ratio (descending)
+                all_matches.sort(key=lambda x: x['match_ratio'], reverse=True)
+                # Store all file paths in the tree (we'll join them with semicolons)
+                file_names = ";".join([os.path.basename(m['filepath']) for m in all_matches])
                 self.tree.insert("", tk.END, values=(
                     distributor['name'],
                     distributor['email'],
                     status,
-                    os.path.basename(best_match['filepath']),
-                    best_match.get('commission', ''),
-                    best_match.get('month', '')
+                    file_names,  # Now contains all matching files
+                    all_matches[0].get('commission', ''),  # Just show first match's commission
+                    all_matches[0].get('month', '')       # Just show first match's month
                 ), tags=('matched',))
             else:
                 self.tree.insert("", tk.END, values=(distributor['name'], distributor['email'], "✖ NO MATCH", "", "", ""), tags=('unmatched',))
@@ -257,7 +259,7 @@ class DistributorMatcherApp:
         self.update_status(f"Done. {matched_count}/{len(self.distributor_data)} matched.")
 
     def find_match_in_file(self, path, target_name):
-        ext = os.path.splitext(path)[-1]
+        ext = os.path.splitext(path)[-1].lower()
 
         try:
             headers = []
@@ -275,10 +277,16 @@ class DistributorMatcherApp:
                 headers = sheet.row_values(0)
                 for i in range(1, sheet.nrows):
                     rows.append(sheet.row_values(i))
+            elif ext == ".csv":
+                with open(path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader)
+                    for row in reader:
+                        rows.append(row)
             else:
                 return None
 
-            possible_keys = ["Distributor' Name", "Distributor Name", "Distributor", "Name"]
+            possible_keys = ["Distributors", "Distributor' Name", "Distributor Name"]
             name_col = next((headers.index(k) for k in possible_keys if k in headers), None)
 
             if name_col is None:
@@ -302,6 +310,8 @@ class DistributorMatcherApp:
                         'rows': rows
                     }
 
+            if best:
+                best['match_ratio'] = best_ratio
             return best
         except Exception as e:
             self.update_status(f"Error reading {path}: {e}")
@@ -319,16 +329,9 @@ class DistributorMatcherApp:
             self.email_preview_text.delete(1.0, tk.END)
             return
             
-        file_name = item_values[3]
+        file_names = item_values[3].split(';')
         folder = self.revenue_entry.get()
-        file_path = os.path.join(folder, file_name)
         
-        if not os.path.exists(file_path):
-            self.preview_text.delete(1.0, tk.END)
-            self.preview_text.insert(tk.END, f"File not found: {file_path}")
-            self.email_preview_text.delete(1.0, tk.END)
-            return
-            
         distributor_name = item_values[0]
         distributor = next((d for d in self.distributor_data if d['name'] == distributor_name), None)
         
@@ -349,26 +352,36 @@ class DistributorMatcherApp:
         self.email_preview_text.insert(tk.END, f"Subject: {distributor['subject']}\n")
         self.email_preview_text.insert(tk.END, f"\nBody:\n{complete_body}")
 
-        match_info = self.find_match_in_file(file_path, distributor_name)
-        
-        if not match_info:
-            self.preview_text.delete(1.0, tk.END)
-            self.preview_text.insert(tk.END, "Could not load match details")
-            return
-            
         self.preview_text.delete(1.0, tk.END)
+        self.preview_text.insert(tk.END, f"Found {len(file_names)} matching files:\n\n")
         
-        headers = match_info.get('headers', [])
-        self.preview_text.insert(tk.END, "Headers:\n")
-        self.preview_text.insert(tk.END, "\t".join(str(h) for h in headers) + "\n\n")
-        
-        rows = match_info.get('rows', [])
-        self.preview_text.insert(tk.END, f"First {min(20, len(rows))} rows:\n")
-        for row in rows[:20]:
-            self.preview_text.insert(tk.END, "\t".join(str(cell) for cell in row) + "\n")
+        for i, file_name in enumerate(file_names, 1):
+            file_path = os.path.join(folder, file_name.strip())
+            if not os.path.exists(file_path):
+                self.preview_text.insert(tk.END, f"{i}. {file_name} (File not found)\n\n")
+                continue
+                
+            match_info = self.find_match_in_file(file_path, distributor_name)
             
-        if len(rows) > 20:
-            self.preview_text.insert(tk.END, f"\n... and {len(rows)-20} more rows")
+            if not match_info:
+                self.preview_text.insert(tk.END, f"{i}. {file_name} (Could not load match details)\n\n")
+                continue
+                
+            self.preview_text.insert(tk.END, f"{i}. {file_name} (Match ratio: {match_info['match_ratio']:.2f})\n")
+            
+            headers = match_info.get('headers', [])
+            self.preview_text.insert(tk.END, "Headers:\n")
+            self.preview_text.insert(tk.END, "\t".join(str(h) for h in headers) + "\n")
+            
+            rows = match_info.get('rows', [])
+            self.preview_text.insert(tk.END, f"First {min(3, len(rows))} rows:\n")
+            for row in rows[:3]:
+                self.preview_text.insert(tk.END, "\t".join(str(cell) for cell in row) + "\n")
+                
+            if len(rows) > 3:
+                self.preview_text.insert(tk.END, f"... and {len(rows)-3} more rows\n")
+            
+            self.preview_text.insert(tk.END, "\n")
 
     def send_selected_email(self):
         if not self.outlook:
@@ -392,14 +405,9 @@ class DistributorMatcherApp:
             messagebox.showerror("Error", "Could not find distributor details")
             return
             
-        file_name = item_values[3]
+        file_names = item_values[3].split(';')
         folder = self.revenue_entry.get()
-        file_path = os.path.join(folder, file_name)
         
-        if not os.path.exists(file_path):
-            messagebox.showerror("Error", f"Attached file not found: {file_path}")
-            return
-            
         try:
             mail = self.outlook.CreateItem(0)
             mail.To = distributor['email']
@@ -415,7 +423,19 @@ class DistributorMatcherApp:
                 complete_body += f"\n\nRegards,\n{distributor['regards']}"
             mail.Body = complete_body
             
-            mail.Attachments.Add(file_path)
+            # Add all attachments
+            attachments_added = 0
+            for file_name in file_names:
+                file_path = os.path.join(folder, file_name.strip())
+                if os.path.exists(file_path):
+                    mail.Attachments.Add(file_path)
+                    attachments_added += 1
+                else:
+                    messagebox.showwarning("File Missing", f"Could not find file: {file_path}")
+            
+            if attachments_added == 0:
+                messagebox.showerror("Error", "No valid attachments found")
+                return
             
             try:
                 mail.Recipients.ResolveAll()
@@ -427,7 +447,7 @@ class DistributorMatcherApp:
                 
             mail.Display(True)
             
-            self.update_status(f"Email prepared for {distributor_name}. Please review and send.")
+            self.update_status(f"Email prepared for {distributor_name} with {attachments_added} attachments. Please review and send.")
             
         except Exception as e:
             messagebox.showerror("Email Error", f"Could not create email: {str(e)}")
@@ -493,16 +513,9 @@ class DistributorMatcherApp:
                 progress_bar["value"] += 1
                 continue
                 
-            file_name = values[3]
-            file_path = os.path.join(folder, file_name)
+            file_names = values[3].split(';')
+            attachments_added = 0
             
-            if not os.path.exists(file_path):
-                details_label.config(text=f"File not found: {file_name}")
-                failed_count += 1
-                failed_distributors.append(f"{distributor_name} - Missing file")
-                progress_bar["value"] += 1
-                continue
-                
             try:
                 mail = self.outlook.CreateItem(0)
                 mail.To = distributor['email']
@@ -520,7 +533,15 @@ class DistributorMatcherApp:
                     complete_body += f"\n\nRegards,\n{distributor['regards']}"
                 mail.Body = complete_body
                 
-                mail.Attachments.Add(file_path)
+                # Add all attachments
+                for file_name in file_names:
+                    file_path = os.path.join(folder, file_name.strip())
+                    if os.path.exists(file_path):
+                        mail.Attachments.Add(file_path)
+                        attachments_added += 1
+                
+                if attachments_added == 0:
+                    raise ValueError("No valid attachments found")
                 
                 unresolved = []
                 try:
@@ -534,7 +555,7 @@ class DistributorMatcherApp:
                 
                 mail.Send()
                 success_count += 1
-                details_label.config(text="Sent successfully")
+                details_label.config(text=f"Sent with {attachments_added} attachments")
                 
             except Exception as e:
                 error_msg = str(e)
