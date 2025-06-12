@@ -1,4 +1,4 @@
-('C:\\Users\\rbasnet\\Desktop\\Outlook_automation\\build\\automate\\PYZ-00.pyz',
+('C:\\Users\\rbasnet\\Documents\\GitHub\\Outlook_automation\\build\\automate\\PYZ-00.pyz',
  [('__future__',
    'C:\\Users\\rbasnet\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__future__.py',
    'PYMODULE'),
