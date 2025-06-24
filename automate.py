@@ -263,56 +263,47 @@ class DistributorMatcherApp:
 
         try:
             headers = []
-            rows = []
+            first_row = []
 
             if ext == ".xlsx":
                 wb = load_workbook(path, read_only=True)
                 sheet = wb.active
                 headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-                for row in sheet.iter_rows(min_row=2, values_only=True):
-                    rows.append(row)
+                first_row = next(sheet.iter_rows(min_row=2, max_row=2, values_only=True), None)
             elif ext == ".xls":
                 wb = xlrd.open_workbook(path)
                 sheet = wb.sheet_by_index(0)
                 headers = sheet.row_values(0)
-                for i in range(1, sheet.nrows):
-                    rows.append(sheet.row_values(i))
+                if sheet.nrows > 1:
+                    first_row = sheet.row_values(1)
             elif ext == ".csv":
                 with open(path, 'r', encoding='utf-8') as f:
                     reader = csv.reader(f)
                     headers = next(reader)
-                    for row in reader:
-                        rows.append(row)
+                    first_row = next(reader, None)
             else:
                 return None
 
-            possible_keys = ["Distributors", "Distributor' Name", "Distributor Name","Distributor"]
+            possible_keys = ["Distributors", "Distributor' Name", "Distributor Name", "Distributor"]
             name_col = next((headers.index(k) for k in possible_keys if k in headers), None)
 
-            if name_col is None:
+            if name_col is None or not first_row:
                 return None
 
-            best = None
-            best_ratio = 0
+            name_in_file = str(first_row[name_col]).strip()
+            ratio = SequenceMatcher(None, name_in_file.lower(), target_name.lower()).ratio()
 
-            for row in rows:
-                name_in_file = str(row[name_col]).strip()
-                ratio = SequenceMatcher(None, name_in_file.lower(), target_name.lower()).ratio()
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    row_data = dict(zip(headers, row))
-                    best = {
-                        'filepath': path,
-                        'match_ratio': ratio,
-                        'commission': row_data.get('Package Number', '') or row_data.get('Commission', ''),
-                        'month': row_data.get('Ecare Month', '') or row_data.get('Month', ''),
-                        'headers': headers,
-                        'rows': rows
-                    }
-
-            if best:
-                best['match_ratio'] = best_ratio
-            return best
+            if ratio > 0.8:  # Only return if the match is good enough
+                row_data = dict(zip(headers, first_row))
+                return {
+                    'filepath': path,
+                    'match_ratio': ratio,
+                    'commission': row_data.get('Package Number', '') or row_data.get('Commission', ''),
+                    'month': row_data.get('Ecare Month', '') or row_data.get('Month', ''),
+                    'headers': headers,
+                    'rows': [first_row]  # Only include the first row
+                }
+            return None
         except Exception as e:
             self.update_status(f"Error reading {path}: {e}")
             return None
@@ -374,12 +365,9 @@ class DistributorMatcherApp:
             self.preview_text.insert(tk.END, "\t".join(str(h) for h in headers) + "\n")
             
             rows = match_info.get('rows', [])
-            self.preview_text.insert(tk.END, f"First {min(3, len(rows))} rows:\n")
-            for row in rows[:3]:
+            self.preview_text.insert(tk.END, f"First row:\n")
+            for row in rows[:1]:  # Only show first row
                 self.preview_text.insert(tk.END, "\t".join(str(cell) for cell in row) + "\n")
-                
-            if len(rows) > 3:
-                self.preview_text.insert(tk.END, f"... and {len(rows)-3} more rows\n")
             
             self.preview_text.insert(tk.END, "\n")
 
