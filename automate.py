@@ -232,14 +232,12 @@ class DistributorMatcherApp:
                     continue
                 file_path = os.path.join(folder, file)
                 match_info = self.find_match_in_file(file_path, distributor['name'])
-                if match_info and match_info['match_ratio'] > 0.8:  # Using our threshold
+                if match_info:  # We only get matches when names are exactly the same
                     all_matches.append(match_info)
 
             if all_matches:
                 matched_count += 1
                 status = "✔ MATCHED"
-                # Sort matches by ratio (descending)
-                all_matches.sort(key=lambda x: x['match_ratio'], reverse=True)
                 # Store all file paths in the tree (we'll join them with semicolons)
                 file_names = ";".join([os.path.basename(m['filepath']) for m in all_matches])
                 self.tree.insert("", tk.END, values=(
@@ -291,13 +289,13 @@ class DistributorMatcherApp:
                 return None
 
             name_in_file = str(first_row[name_col]).strip()
-            ratio = SequenceMatcher(None, name_in_file.lower(), target_name.lower()).ratio()
-
-            if ratio > 0.8:  # Only return if the match is good enough
+            
+            # Only return match if names are exactly the same (case-insensitive)
+            if name_in_file.lower() == target_name.lower():
                 row_data = dict(zip(headers, first_row))
                 return {
                     'filepath': path,
-                    'match_ratio': ratio,
+                    'match_ratio': 1.0,  # Since we're doing exact match, ratio is always 1.0
                     'commission': row_data.get('Package Number', '') or row_data.get('Commission', ''),
                     'month': row_data.get('Ecare Month', '') or row_data.get('Month', ''),
                     'headers': headers,
@@ -358,7 +356,7 @@ class DistributorMatcherApp:
                 self.preview_text.insert(tk.END, f"{i}. {file_name} (Could not load match details)\n\n")
                 continue
                 
-            self.preview_text.insert(tk.END, f"{i}. {file_name} (Match ratio: {match_info['match_ratio']:.2f})\n")
+            self.preview_text.insert(tk.END, f"{i}. {file_name}\n")
             
             headers = match_info.get('headers', [])
             self.preview_text.insert(tk.END, "Headers:\n")
